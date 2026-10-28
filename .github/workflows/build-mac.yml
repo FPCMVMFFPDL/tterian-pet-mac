@@ -1,1 +1,32 @@
+name: Build TTERIAN PET for Mac
 
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --include=optional
+      - name: Build macOS installers
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist:mac
+      - name: Upload installers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TTERIAN_PET_Mac_installers
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: warn
