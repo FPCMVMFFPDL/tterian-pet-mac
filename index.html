@@ -1,0 +1,1621 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>TTERIAN_PET</title>
+<style>
+:root{
+  --pet-bubble-bg:#ffffff;
+  --pet-bubble-text:#1f2a44;
+  --pet-bubble-border:#E80028;
+  --pet-bubble-radius:14px;
+  --pet-bubble-font-size:14px;
+  --menu-bg:#fff;
+  --menu-text:#1f2a44;
+  --menu-border:#c9d1ea;
+  --menu-radius:12px;
+}
+html,body{
+  margin:0;
+  height:100%;
+  overflow:hidden;
+  background:transparent;
+  font-family:"Malgun Gothic","Apple SD Gothic Neo",sans-serif
+}
+canvas{
+  position:absolute;
+  left:0;
+  top:0;
+  transform-origin:50% 60%;
+  pointer-events:none
+}
+.bub{
+  --bubble-img:none;
+  position:absolute;
+  left:0;
+  top:0;
+  opacity:0;
+  white-space:normal;
+  max-width:260px;
+  text-align:center;
+  background:var(--pet-bubble-bg) var(--bubble-img) center/100% 100% no-repeat;
+  color:var(--pet-bubble-text);
+  border:2px solid var(--pet-bubble-border);
+  border-radius:var(--pet-bubble-radius);
+  padding:8px 12px;
+  font-size:var(--pet-bubble-font-size);
+  pointer-events:none;
+  transition:opacity .15s;
+  box-sizing:border-box;
+  z-index:8
+}
+.bub.img{
+  border:0;
+  border-radius:0;
+  padding:14px 22px
+}
+.bub.recommend-card{
+  width:280px;
+  max-width:280px;
+  text-align:left;
+  padding:15px 17px;
+  border:2px solid #E80028;
+  border-radius:16px;
+  background:#fff;
+  box-shadow:0 8px 24px #1f2a4420;
+  white-space:normal
+}
+.recommend-card .rec-kicker{
+  font-size:15px;
+  font-weight:800;
+  color:#E80028;
+  letter-spacing:.02em;
+  margin-bottom:7px
+}
+.recommend-card .rec-name{
+  font-size:19px;
+  font-weight:900;
+  color:#202536;
+  line-height:1.25;
+  margin-bottom:8px
+}
+.recommend-card .rec-desc{
+  font-size:13px;
+  font-weight:500;
+  color:#4b5563;
+  line-height:1.5
+}
+.fortune-card .rec-name{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px
+}
+.fortune-card .rec-stars{
+  font-size:16px;
+  color:#f5a623;
+  letter-spacing:1px;
+  white-space:nowrap
+}
+.fortune-card .rec-lucky{
+  margin-top:11px;
+  padding-top:10px;
+  border-top:1px dashed #f3b6c0;
+  font-size:12.5px;
+  font-weight:800;
+  color:#E80028
+}
+#menu{
+  position:absolute;
+  display:none;
+  flex-direction:column;
+  min-width:170px;
+  padding:6px;
+  background:var(--menu-bg);
+  color:var(--menu-text);
+  border:1px solid var(--menu-border);
+  border-radius:var(--menu-radius);
+  box-shadow:0 6px 24px #0003;
+  z-index:9
+}
+#menu button{
+  font:inherit;
+  font-size:14px;
+  text-align:left;
+  padding:9px 12px;
+  border:0;
+  border-radius:8px;
+  background:none;
+  cursor:pointer;
+  color:var(--menu-text)
+}
+#menu button:hover{background:#eef1fa}
+.menu-divider{
+  height:0;
+  margin:5px 8px;
+  border-top:1px dashed #b8bfd0;
+  flex-shrink:0
+}
+.resize-handle{
+  position:absolute;
+  display:none;
+  left:0;
+  top:0;
+  width:24px;
+  height:24px;
+  border:0;
+  border-radius:8px;
+  background:#fff;
+  color:#334155;
+  box-shadow:0 2px 8px #0003;
+  z-index:10;
+  cursor:nwse-resize;
+  font-size:17px;
+  line-height:24px;
+  padding:0;
+  pointer-events:auto
+}
+.resize-handle.visible{display:block}
+.heart{
+  position:absolute;
+  color:#FF0000;
+  font-size:22px;
+  pointer-events:none;
+  animation:up 1s ease-out forwards
+}
+@keyframes up{
+  from{opacity:1;transform:translateY(0)}
+  to{opacity:0;transform:translateY(-50px)}
+}
+</style>
+</head>
+<body>
+<div id="menu"></div>
+
+<script>
+const { ipcRenderer } = require('electron'),
+      fs = require('fs'),
+      path = require('path');
+
+const ROOT = __dirname,
+      PI2 = Math.PI * 2,
+      dpr = Math.min(devicePixelRatio || 1, 2);
+
+const STATES = ['idle','sit','sleep','click','typing'];
+
+const FPS = {
+  idle:3,
+  sit:3,
+  sleep:1.375,
+  wakeup:1.375,
+  click:12,
+  typing:5
+};
+
+const NOLOOP = ['click'];
+
+const WAKE_STEP = 300;
+const WAKE_HOLD = 450;
+const IDLE_SLEEP_MS = 120000;
+
+const DL = ['안녕!','오늘도 힘내자!','쓰다듬어줘~','심심해...','같이 놀자!','헤헤'];
+
+const DC = [
+  '오늘 뭐 해?',
+  '나 여기 있을게, 편하게 일해!',
+  '같이 있으니까 좋다~',
+  '잠깐 쉬었다 해도 돼!'
+];
+
+/* ===== 캐릭터별 간식 대사 ===== */
+
+const FRIES_LINES = [
+  '감자튀김 먹고 싶떼!',
+  '바삭한 감자튀김이 최고떼!',
+  '감자튀김은 길쭉길쭉해서 좋떼~',
+  '감자튀김 한 입만 주라떼!',
+  '감자튀김 생각에 배고프떼...',
+  '감자튀김은 따뜻할 때 먹어야 하떼!',
+  '감자튀김이랑 콜라 조합은 완벽하떼!',
+  '오늘 간식은 감자튀김으로 정했떼!',
+  '감자튀김 냄새가 나는 것 같떼!',
+  '감자튀김 한 봉지면 행복하떼!'
+];
+
+const CHEESE_LINES = [
+  '치즈스틱 먹고 싶떼!',
+  '치즈스틱 쭈욱 늘어나떼~!',
+  '고소한 치즈스틱이 최고떼!',
+  '치즈스틱 한 입만 주라떼!',
+  '치즈가 쭉 늘어나면 기분 좋떼!',
+  '따뜻한 치즈스틱이 당긴떼...',
+  '치즈스틱은 겉바속촉이떼!',
+  '오늘 간식은 치즈스틱이떼!',
+  '치즈스틱 찍어 먹으면 더 맛있떼!',
+  '치즈스틱 생각만 해도 행복하떼!'
+];
+
+const SOFTCON_LINES = [
+  '소프트콘 먹고 싶떼~!',
+  '부드러운 소프트콘 최고떼!',
+  '소프트콘은 천천히 먹어야 하떼!',
+  '소프트콘 한 입이면 행복하떼!',
+  '앗, 소프트콘 녹는다떼!',
+  '오늘은 소프트콘이 당긴떼...',
+  '차가운 소프트콘이 좋떼!',
+  '소프트콘 꼭대기부터 먹을 거떼!',
+  '소프트콘 먹으면서 쉬고 싶떼~',
+  '소프트콘 하나면 기분 전환이떼!'
+];
+
+/* ===== 공통 대사 ===== */
+
+const CLICK_LINES = [
+  '떼뗏!','떼?','떼떼떼!','맛있떼!','간지럽떼~!','으앗떼!',
+  '깜짝이야떼!','헤헤떼~','왜 불렀떼?','여기 있떼!','불렀떼?',
+  '좋아떼!','오늘도 힘내라떼!','같이 놀자떼!','심심했떼~',
+  '쓰다듬어달라떼!','기분 좋떼!','뭐 필요하떼?','배고프떼...',
+  '열심히 하고 있떼?','오늘도 수고했떼!','잘하고 있떼!',
+  '대단하떼!','멋지떼!','응원한다떼!','화이팅떼!',
+  '떼떼떼떼!','뽀용뽀용떼~','말랑말랑하떼!',
+  '콕콕 찌르지 말라떼~','거기 간지럽떼!',
+  '으헤헤떼!','살살 눌러라떼!','두근두근하떼!',
+  '오늘 기분 어떻떼?','나 귀엽떼?','떼에~','찾았떼!',
+  '짠떼!','옆에 있어줄게떼!','같이 있어서 좋떼!',
+  '떼잉!','앗떼!','오잉떼?','두근떼!',
+  '심심하면 말 걸라떼!','오늘도 잘 부탁한다떼!',
+  '떼떼, 떼떼떼~','나 여기 있떼!'
+];
+
+const HEALTH_LINES = [
+  '허리 쭉 펴라떼!',
+  '잠깐 일어나서 스트레칭할까떼?',
+  '화면에서 눈을 떼고 먼 곳을 보라떼~',
+  '눈 운동 한 번 하자떼!',
+  '물 한 잔 마셨떼?',
+  '어깨에 힘 빼라떼~',
+  '목도 천천히 풀어주라떼!',
+  '손목도 잠깐 쉬게 해주라떼!',
+  '오래 앉아 있었떼! 잠깐 움직이자떼!',
+  '눈 깜빡깜빡, 눈도 쉬어야 하떼!',
+  '등을 쭉 펴면 기분도 좋아진다떼!',
+  '잠깐 심호흡하자떼~',
+  '쉬는 것도 열심히 일하는 거라떼!',
+  '너무 무리하지 말라떼!',
+  '잠깐 쉬었다 다시 하자떼!',
+  '오늘 물 충분히 마셨떼?',
+  '손가락도 스트레칭해주라떼!',
+  '자세가 구부정하떼~ 허리 펴라떼!',
+  '멀리 있는 곳을 보면서 눈 쉬자떼!',
+  '잠깐 일어나서 몸을 풀어보라떼!'
+];
+
+const ANNOY_LINES = [
+  '건들지말라떼!','자꾸 누르지 말라떼!','그만 눌러라떼!',
+  '아프떼!','으으, 화낸다떼!','삐졌떼!','그만하라떼~!',
+  '진짜 화난다떼!','콕콕 그만떼!','간식 주면 용서해준다떼!',
+  '이제 안 놀아준다떼!','흥떼!','떼애앵!','너무 많이 눌렀떼!'
+];
+
+const SLEEPY_LINES = [
+  '으앙… 깜짝이야떼!','음냐… 뭐떼?','아직 졸리떼…',
+  '5분만 더떼…','잘 자고 있었떼!','자는데 왜 깨우떼~',
+  '하암… 떼?','으응… 떼뗏?','깨웠떼!','꿈에서 간식 먹었떼…'
+];
+
+const PAT_LINES = [
+  '뽀용뽀용떼~','간지럽떼~!','기분 좋떼~','더 쓰다듬어달라떼!',
+  '헤헤, 좋떼!','말랑말랑해진다떼~','사르르 녹는다떼~',
+  '쓰담쓰담 좋떼!','떼에~ 행복하떼!','손길이 따뜻하떼~'
+];
+
+const SLEEP_LINES = [
+  '코오… 떼…','굿나잇떼~','zZ… 떼…','잠깐 눈 붙인다떼…',
+  '졸리떼… 자야겠떼'
+];
+
+const WAKE_LINES = [
+  '으아암… 잘 잤떼!','개운하떼~!','일어났떼! 떼떼떼!',
+  '다시 힘내보자떼!','하암~ 이제 놀자떼!','푹 잤떼!'
+];
+
+let lastLine = '';
+
+const rnd = a => a[Math.floor(Math.random() * a.length)];
+
+const pickLine = a => {
+  let t;
+  do {
+    t = rnd(a);
+  } while (t === lastLine && a.length > 1);
+  lastLine = t;
+  return t;
+};
+
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const exists = p => fs.existsSync(path.join(ROOT, p));
+
+const loadImg = src => {
+  const i = new Image();
+  i.ok = false;
+  i.onload = () => i.ok = true;
+  i.src = src;
+  return i;
+};
+
+const chairImg = exists('shared/chair.png')
+  ? loadImg('shared/chair.png')
+  : null;
+
+const bubbleImg = exists('shared/bubble.png');
+
+let pets = [],
+    dp = null,
+    over = false,
+    mouseX = -9999,
+    mouseY = -9999,
+    lastTypingActivity = 0,
+    lastInputAt = performance.now();
+
+let petPositions = {};
+
+try {
+  petPositions = JSON.parse(localStorage.getItem('petPositions') || '{}') || {};
+} catch {}
+
+const savePetPositions = () =>
+  localStorage.setItem('petPositions', JSON.stringify(petPositions));
+
+const menu = document.getElementById('menu');
+
+class Pet {
+  constructor(id) {
+const dir = path.join(ROOT, 'characters', id);
+
+const c = this.cfg = JSON.parse(
+  fs.readFileSync(path.join(dir, 'character.json'), 'utf8')
+);
+
+    this.id = id;
+    this.S = Number.isFinite(petPositions[id]?.size)
+      ? petPositions[id].size
+      : (c.size || 200);
+
+    this.fy = (c.feetY || .89) * this.S;
+    this.color = c.color || '#8fe3cf';
+    this.lines = c.lines || DL;
+    this.chat = c.chatLines || DC;
+    this.fps = Object.assign({}, FPS, c.fps);
+    this.frames = {};
+
+    for (const s of STATES) {
+      const d = path.join(dir, s);
+      if (!fs.existsSync(d)) continue;
+
+      const f = fs.readdirSync(d)
+        .filter(n => /\.png$/i.test(n) &&
+          (s !== 'idle' || /idle_0[12]\.png$/i.test(n)))
+        .sort();
+
+      if (f.length) {
+        this.frames[s] = f.map(n =>
+          loadImg('characters/' + id + '/' + s + '/' + n)
+        );
+      }
+    }
+
+    const cv = this.cv = document.createElement('canvas');
+    cv.width = cv.height = this.S * dpr;
+    cv.style.width = cv.style.height = this.S + 'px';
+
+    this.ctx = cv.getContext('2d', { willReadFrequently: true });
+
+    this.bub = document.createElement('div');
+    this.bub.className = 'bub';
+
+    this.typing = false;
+    this.typingFrame = -1;
+    this.typingUntil = 0;
+    this.shakeX = 0;
+    this.shakeY = 0;
+    this.baseSize = this.S;
+    this.waking = false;
+
+    if (bubbleImg) {
+      this.bub.classList.add('img');
+      this.bub.style.setProperty('--bubble-img', 'url(shared/bubble.png)');
+    }
+
+    document.body.append(cv, this.bub);
+
+    const order = Math.max(0, Number(id.match(/(\d+)$/)?.[1] || 1) - 1);
+    const slots = [0.22, 0.5, 0.78];
+    const saved = petPositions._pos || petPositions[id];
+
+    Object.assign(this, {
+      st:'idle',
+      t0:0,
+      dur:2200,
+      x:Number.isFinite(saved?.x) ? saved.x : innerWidth * slots[order % slots.length],
+      y:Number.isFinite(saved?.y) ? saved.y : innerHeight - 4,
+      vx:0,
+      vy:0,
+      rot:0,
+      rotVel:0,
+      sq:0,
+      dir:1,
+      seated:false,
+      tilt:0,
+      flyT:0,
+      drag:null,
+      hist:[],
+      bubUntil:0,
+      nextChat:Infinity,
+      order,
+      nextBlink:performance.now() + 3500 + Math.random()*6500,
+      blinkUntil:0,
+      doubleBlink:false,
+      secondBlinkAt:0
+    });
+
+    this.set('idle', 3000);
+  }
+
+  set(s, d) {
+    this.st = s;
+    this.t0 = performance.now();
+    this.dur = d || 0;
+    this.wakeAt = null;
+    this.wakeReq = false;
+  }
+
+  requestWake(msg) {
+    if (this.st === 'sleep') {
+      this.wakeReq = true;
+      this.wakeMsg = msg;
+    }
+  }
+
+  say(t) {
+    this.bub.classList.remove('recommend-card', 'fortune-card');
+    this.bub.textContent = t;
+    this.bubUntil = performance.now() + 2600;
+  }
+
+  sayRecommendation(name, description) {
+    this.bub.classList.remove('fortune-card');
+    this.bub.classList.add('recommend-card');
+    this.bub.innerHTML =
+      `<div class="rec-kicker">추천 메뉴</div><div class="rec-name"></div><div class="rec-desc"></div>`;
+
+    this.bub.querySelector('.rec-name').textContent = name;
+    this.bub.querySelector('.rec-desc').textContent = description;
+    this.bubUntil = performance.now() + 4200;
+  }
+
+  sayFortune(score, text, lucky) {
+    const n = Math.round(score / 20);
+
+    this.bub.classList.add('recommend-card', 'fortune-card');
+    this.bub.innerHTML =
+      `<div class="rec-kicker">오늘의 간식 운세</div><div class="rec-name"><span class="rec-score"></span><span class="rec-stars"></span></div><div class="rec-desc"></div><div class="rec-lucky"></div>`;
+
+    this.bub.querySelector('.rec-score').textContent = `행운 지수 ${score}점`;
+    this.bub.querySelector('.rec-stars').textContent =
+      '★'.repeat(n) + '☆'.repeat(5 - n);
+    this.bub.querySelector('.rec-desc').textContent = text;
+    this.bub.querySelector('.rec-lucky').textContent = `행운 메뉴 · ${lucky}`;
+    this.bubUntil = performance.now() + 5200;
+  }
+
+  heart() {
+    const h = document.createElement('span');
+    h.className = 'heart';
+    h.textContent = '♥';
+    h.style.left = (this.x + Math.random()*50 - 25) + 'px';
+    h.style.top = (this.y - this.fy + this.S*.15) + 'px';
+
+    document.body.appendChild(h);
+    setTimeout(() => h.remove(), 1000);
+  }
+
+  pick(now) {
+    const r = Math.random();
+
+    if (r < .045) {
+      this.set('sleep', 18000 + Math.random()*14000);
+    } else if (r < .22) {
+      this.set('sit', 2500 + Math.random()*3500);
+    } else {
+      this.set('idle', 9000 + Math.random()*9000);
+    }
+  }
+
+  wake() {
+    this.idleSince = performance.now();
+  }
+
+  update(dt, now) {
+    const p = this,
+          S = p.S,
+          G = innerHeight - 4,
+          age = now - p.t0,
+          st = p.st;
+
+    if (p.idleSince === undefined) p.idleSince = now;
+
+    p.sq = Math.max(0, p.sq - dt*4.5);
+
+    if (st === 'wakeup' && age >= p.dur) {
+      p.waking = false;
+      p.set('idle', 5000 + Math.random()*5000);
+    }
+
+    if (st === 'sleep') {
+      if (p.wakeAt == null && (age >= p.dur || p.wakeReq)) {
+        const cyc = (p.frames.sleep?.length || 0) >= 5;
+        const intro = 1440;
+        const cycle = 2160;
+        const f5 = 1440;
+
+        let wait = 0;
+        let hold = WAKE_HOLD;
+
+        if (cyc) {
+          const rel = age - intro;
+
+          if (rel < 0) {
+            wait = intro + f5 - age;
+          } else {
+            const pos = rel % cycle;
+
+            if (pos < f5) {
+              wait = f5 - pos;
+            } else {
+              hold = Math.max(300, WAKE_HOLD - (pos - f5));
+            }
+          }
+        }
+
+        p.wakeAt = now + wait;
+        p.wakeHold = hold;
+      }
+
+      if (p.wakeAt != null && now >= p.wakeAt) {
+        const m = p.wakeMsg;
+        p.waking = true;
+
+        p.wakeSeq = [
+          [4, p.wakeHold],
+          [1, WAKE_STEP],
+          [0, WAKE_STEP]
+        ];
+
+        p.set(
+          'wakeup',
+          p.wakeSeq.reduce((a, q) => a + q[1], 0)
+        );
+
+        if (m) p.say(m);
+      }
+    }
+    else if (st === 'idle' || st === 'sit') {
+      if (now - lastInputAt > IDLE_SLEEP_MS && !p.typing) {
+        p.set('sleep', Infinity);
+      } else if (age > p.dur) {
+        p.pick(now);
+      }
+    }
+
+    if (p.typing && now >= p.typingUntil) {
+      p.typing = false;
+    }
+
+    if (st === 'click' && age > 520) {
+      p.set('idle', 2600 + Math.random()*2500);
+    }
+
+    p.x = clamp(p.x, S/2, Math.max(S/2, innerWidth-S/2));
+    p.y = clamp(p.y, Math.min(S, G), innerHeight + S/2);
+
+    p.rot += (0 - p.rot) * Math.min(1, dt*8);
+
+    p.render(now, age);
+
+    if (!p.typing) {
+      p.shakeX = 0;
+      p.shakeY = 0;
+    }
+
+    p.cv.style.transform =
+      `translate(${p.x - S/2 + p.shakeX}px,${p.y - p.fy + p.shakeY}px) scaleX(${p.dir})`;
+
+    if (now < p.bubUntil) {
+      p.bub.style.opacity = 1;
+      p.bub.style.transform =
+        `translate(${clamp(p.x,60,innerWidth-60)}px,${p.y - p.fy - S*.08}px) translate(-50%,-100%)`;
+    } else {
+      p.bub.style.opacity = 0;
+    }
+  }
+
+  render(now, age) {
+    const { ctx, S, st } = this;
+
+    let fr = this.frames[st + (this.seated ? '_chair' : '')];
+    let sep = false;
+
+    if (!fr && this.seated && this.frames[st]) {
+      fr = this.frames[st];
+      sep = true;
+    }
+
+    if (!fr && st !== 'wakeup') fr = this.frames.idle;
+    if (!fr) fr = this.frames.idle;
+    if (!fr || !fr.length) return;
+
+    const fps = this.fps[st] || 6;
+    const n = fr.length;
+    let i;
+
+    if (this.typing && this.frames.typing?.length) {
+      fr = this.frames.typing;
+      i = this.typingFrame % fr.length;
+
+    } else if (st === 'wakeup' && this.frames.sleep?.length) {
+      const sf = this.frames.sleep;
+      const seq = this.wakeSeq || [
+        [4, WAKE_HOLD],
+        [1, WAKE_STEP],
+        [0, WAKE_STEP]
+      ];
+
+      let acc = 0;
+      let k = seq.length - 1;
+
+      for (let j = 0; j < seq.length; j++) {
+        if (age < acc + seq[j][1] || j === seq.length - 1) {
+          k = j;
+          break;
+        }
+        acc += seq[j][1];
+      }
+
+      i = Math.min(seq[k][0], sf.length - 1);
+      fr = sf;
+
+    } else if (st === 'idle' && n >= 2) {
+      if (now >= this.nextBlink && now >= this.blinkUntil) {
+        this.blinkUntil = now + 140;
+
+        if (Math.random() < 0.28) {
+          this.doubleBlink = true;
+          this.secondBlinkAt = now + 300;
+        } else {
+          this.doubleBlink = false;
+        }
+
+        this.nextBlink = now + 4500 + Math.random()*6500;
+      }
+
+      if (
+        this.doubleBlink &&
+        now >= this.secondBlinkAt &&
+        now < this.secondBlinkAt + 140
+      ) {
+        this.blinkUntil = Math.max(this.blinkUntil, now + 140);
+      }
+
+      if (
+        this.doubleBlink &&
+        now >= this.secondBlinkAt + 140
+      ) {
+        this.doubleBlink = false;
+      }
+
+      i = (now < this.blinkUntil) ? 1 : 0;
+
+    } else if (st === 'sleep' && n >= 3) {
+      const frameMs = 720;
+
+      if (age < frameMs) {
+        i = 0;
+      } else if (age < frameMs * 2) {
+        i = 1;
+      } else if (n >= 5) {
+        i = [2, 3, 4][
+          Math.floor((age - frameMs * 2) / frameMs) % 3
+        ];
+      } else {
+        i = Math.min(2, n - 1);
+      }
+
+    } else {
+      i = NOLOOP.includes(st)
+        ? Math.min(Math.floor(age*fps/1000), n-1)
+        : Math.floor(age*fps/1000) % n;
+    }
+
+    if (!fr[i] || !fr[i].ok) return;
+
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,S,S);
+
+    if (sep) {
+      if (chairImg && chairImg.ok) {
+        ctx.drawImage(chairImg, 0, 0, S, S);
+      } else {
+        ctx.save();
+        ctx.scale(S/200, S/200);
+        chairShape(ctx);
+        ctx.restore();
+      }
+
+      ctx.translate(0, -S*.13);
+    }
+
+    ctx.translate(S/2, this.fy);
+    ctx.scale((1 + .28*this.sq), (1 - .3*this.sq));
+    ctx.translate(-S/2, -this.fy);
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(fr[i], 0, 0, S, S);
+  }
+
+  shape(t, age) {
+    const ctx = this.ctx,
+          s = this.st,
+          k = this.S/200,
+          INK = '#1f2a44',
+          seated = this.seated;
+
+    ctx.setTransform(dpr*k,0,0,dpr*k,0,0);
+    ctx.clearRect(0,0,200,200);
+
+    let sx = 1,
+        sy = 1,
+        oy = 0,
+        lift = 0,
+        fa = 0,
+        eye = 'open',
+        mouth = 'smile';
+
+    switch (s) {
+      case 'idle': {
+        if (t % 3200 < 140) eye = 'closed';
+        break;
+      }
+      case 'sit': {
+        sy = .82 + Math.sin(t/700)*.015;
+        sx = 1.08;
+        mouth = seated ? 'smile' : 'flat';
+        if (seated) fa = Math.sin(t/600)*6;
+        if (t % 3600 < 140) eye = 'closed';
+        break;
+      }
+      case 'sleep': {
+        sy = .7 + Math.sin(t/900)*.03;
+        sx = 1.15;
+        eye = 'closed';
+        mouth = 'flat';
+        break;
+      }
+      case 'click': {
+        const j = Math.sin(Math.min(age/650,1)*Math.PI);
+        oy = -j*34;
+        sy = 1 + j*.08;
+        eye = 'happy';
+        mouth = 'open';
+        break;
+      }
+    }
+
+    sx *= 1 + .28*this.sq;
+    sy *= 1 - .3*this.sq;
+
+    if (seated) {
+      chairShape(ctx);
+      ctx.translate(0, -26);
+    }
+
+    const bottom = 164 + oy - (lift ? 10 : 0);
+    const H = 96*sy;
+    const cy = bottom - H/2;
+
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = INK;
+    ctx.lineJoin = ctx.lineCap = 'round';
+    ctx.fillStyle = this.color;
+
+    for (const q of [-1,1]) {
+      const f = q < 0 ? fa : -fa;
+      const up = Math.max(0,f)*.5;
+
+      ctx.beginPath();
+      ctx.ellipse(
+        100 + q*24*sx + q*(s === 'sit' ? 6 : 0) + f*.5,
+        bottom + 7 + (lift ? 8 : 0) - up,
+        11, 8, 0, 0, 7
+      );
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    const top = cy - H/2;
+    const sw = Math.sin(t/500)*4;
+
+    ctx.beginPath();
+    ctx.moveTo(100, top+2);
+    ctx.quadraticCurveTo(100+sw, top-14, 100+sw*1.5+4, top-22);
+    ctx.stroke();
+
+    ctx.fillStyle = '#5ccf8b';
+    ctx.beginPath();
+    ctx.ellipse(100+sw*1.5+11, top-24, 11, 6, -.4, 0, 7);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.ellipse(100, cy, 55*sx, H/2, 0, 0, 7);
+    ctx.fill();
+    ctx.stroke();
+
+    const ey = cy - H*.06;
+
+    for (const q of [-1,1]) {
+      const x0 = 104 + q*21*sx;
+
+      ctx.globalAlpha = .8;
+      ctx.fillStyle = '#ff9fb2';
+      ctx.beginPath();
+      ctx.ellipse(104 + q*35*sx, ey+14, 6, 4, 0, 0, 7);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = INK;
+
+      if (eye === 'open' || eye === 'wide') {
+        const r = eye === 'wide' ? 8 : 6;
+
+        ctx.beginPath();
+        ctx.arc(x0, ey, r, 0, 7);
+        ctx.fill();
+
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(x0+2, ey-2, 2, 0, 7);
+        ctx.fill();
+
+      } else {
+        ctx.beginPath();
+
+        if (eye === 'closed') {
+          ctx.moveTo(x0-6, ey);
+          ctx.quadraticCurveTo(x0, ey+5, x0+6, ey);
+        } else {
+          ctx.moveTo(x0-6, ey+3);
+          ctx.quadraticCurveTo(x0, ey-6, x0+6, ey+3);
+        }
+
+        ctx.stroke();
+      }
+    }
+
+    const mx = 104;
+    const my = ey + 16;
+
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+
+    if (mouth === 'smile') {
+      ctx.moveTo(mx-5, my);
+      ctx.quadraticCurveTo(mx, my+6, mx+5, my);
+      ctx.stroke();
+    } else if (mouth === 'flat') {
+      ctx.moveTo(mx-4, my+2);
+      ctx.lineTo(mx+4, my+2);
+      ctx.stroke();
+    } else if (mouth === 'open') {
+      ctx.ellipse(mx, my+3, 5, 6, 0, 0, 7);
+      ctx.fill();
+    } else {
+      ctx.arc(mx, my+3, 4, 0, 7);
+      ctx.fill();
+    }
+
+    if (s === 'sleep') {
+      ctx.fillStyle = INK;
+
+      for (let i = 0; i < 3; i++) {
+        const q = (t/1400 + i/3) % 1;
+        ctx.globalAlpha = 1 - q;
+        ctx.font = 'bold ' + (14 + q*8) + 'px sans-serif';
+        ctx.fillText('z', 128 + q*22, cy - 20 - q*50);
+      }
+
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  hit(e) {
+    const S = this.S;
+    const vx0 = e.clientX - this.x;
+    const vy0 = e.clientY - (this.y - this.fy + S*.6);
+    const c = Math.cos(this.rot);
+    const n = Math.sin(this.rot);
+
+    const px = (vx0*c + vy0*n)*this.dir + S/2;
+    const py = -vx0*n + vy0*c + S*.6;
+
+    if (px < 0 || py < 0 || px >= S || py >= S) return false;
+
+    return this.ctx.getImageData(
+      Math.floor(px*dpr),
+      Math.floor(py*dpr),
+      1, 1
+    ).data[3] > 20;
+  }
+
+  down(e) {
+    this.drag = {
+      sx:e.clientX,
+      sy:e.clientY,
+      ox:this.x,
+      oy:this.y,
+      moved:false
+    };
+    this.wake();
+  }
+
+  move(e) {
+    if (!this.drag) return;
+
+    const dx = e.clientX - this.drag.sx;
+    const dy = e.clientY - this.drag.sy;
+
+    if (Math.abs(dx) + Math.abs(dy) > 5) {
+      this.drag.moved = true;
+    }
+
+    if (this.drag.moved) {
+      this.x = clamp(
+        this.drag.ox + dx,
+        this.S/2,
+        Math.max(this.S/2, innerWidth-this.S/2)
+      );
+
+      this.y = clamp(
+        this.drag.oy + dy,
+        Math.min(this.S, 0),
+        innerHeight + this.S/2
+      );
+    }
+  }
+
+  up() {
+    if (!this.drag) return;
+
+    const moved = this.drag.moved;
+    this.drag = null;
+
+    if (moved) {
+      petPositions[this.id] = {
+        ...petPositions[this.id],
+        x:this.x,
+        y:this.y
+      };
+
+      petPositions._pos = { x:this.x, y:this.y };
+      savePetPositions();
+      return;
+    }
+
+    this.heart();
+
+    const now = performance.now();
+    const sleepy = this.st === 'sleep' || this.st === 'wakeup';
+
+    this.clicks = (this.clicks || []).filter(t => now - t < 10000);
+    this.clicks.push(now);
+
+    this.sq = .55;
+    this.set('click', 520);
+
+    let reactions;
+
+    if (sleepy) {
+      reactions = SLEEPY_LINES;
+    } else if (this.clicks.length >= 60) {
+      reactions = ANNOY_LINES;
+    } else {
+      const characterLines = {
+        char_01: FRIES_LINES,
+        char_02: CHEESE_LINES,
+        char_03: SOFTCON_LINES
+      };
+
+      const snackLines = characterLines[this.id] || [];
+      const roll = Math.random();
+
+      if (roll < 0.28) {
+        reactions = HEALTH_LINES;
+      } else if (roll < 0.53 && snackLines.length) {
+        reactions = snackLines;
+      } else {
+        reactions = CLICK_LINES;
+      }
+    }
+
+    this.say(pickLine(reactions));
+  }
+
+  act(a) {
+    this.wake();
+
+    if (a === 'recommend') {
+      const options = [
+        ['양념너겟', '달콤짭짤한 양념너겟으로 기분 업! 떼떼떼!'],
+        ['치킨너겟', '한 입에 쏙 들어오는 치킨너겟 어때? 떼떼떼!'],
+        ['포테이토', '바삭한 포테이토는 언제나 정답이야. 떼떼떼!'],
+        ['포테이토(L)', '오늘은 넉넉하게 포테이토 라지! 떼떼떼!'],
+        ['양념감자', '롯데리아 대표 사이드 양념감자로 가자! 떼떼떼!'],
+        ['치즈스틱', '쭉 늘어나는 치즈스틱이 당기는 날이야. 떼떼떼!'],
+        ['롱치즈스틱', '길쭉하고 고소한 롱치즈스틱 추천! 떼떼떼!'],
+        ['통오징어링', '쫄깃바삭 통오징어링으로 색다르게! 떼떼떼!'],
+        ['지파이 하바네로(L)', '매콤한 게 당기면 지파이 하바네로! 떼떼떼!'],
+        ['지파이 고소한맛(S)', '고소한 맛의 지파이도 좋은 선택이야. 떼떼떼!'],
+        ['콘샐러드', '산뜻하게 콘샐러드로 균형을 맞춰봐! 떼떼떼!'],
+        ['화이어윙', '오늘은 매콤한 화이어윙으로 활력 충전! 떼떼떼!'],
+        ['치킨휠레', '촉촉한 치킨휠레가 오늘의 추천이야. 떼떼떼!'],
+        ['치킨다리 1조각', '든든한 치킨다리 한 조각 어때? 떼떼떼!'],
+        ['팥빙수', '달콤 시원한 팥빙수로 쉬어가자! 떼떼떼!'],
+        ['말차빙수', '오늘은 향긋한 말차빙수 추천! 떼떼떼!'],
+        ['토네이도 말차쿠키', '말차와 쿠키 조합은 실패가 없어! 떼떼떼!'],
+        ['토네이도 망고젤리', '상큼달콤한 망고젤리 토네이도 어때? 떼떼떼!'],
+        ['토네이도 초코쿠키', '초코쿠키 토네이도로 달콤함 충전! 떼떼떼!'],
+        ['토네이도 스트로베리', '상큼한 딸기 토네이도가 잘 어울리는 날! 떼떼떼!'],
+        ['토네이도 더블초코', '초코가 두 배인 토네이도로 행복도 두 배! 떼떼떼!'],
+        ['선데이 아이스크림 플레인', '심플해서 더 좋은 플레인 선데이! 떼떼떼!'],
+        ['선데이 아이스크림 스트로베리', '딸기 선데이로 달콤한 마무리! 떼떼떼!'],
+        ['선데이 허쉬초코', '진한 초코가 당기는 날엔 허쉬초코 선데이! 떼떼떼!'],
+        ['소프트콘', '부드러운 소프트콘 하나로 기분 전환! 떼떼떼!']
+      ];
+
+      const [name, line] = rnd(options);
+      this.sayRecommendation(name, line);
+      this.set('click', 520);
+
+    } else if (a === 'fortune') {
+      const fortunes = [
+        "오늘은 작은 선택 하나가 기분 좋은 하루를 만들어 줄 거야. 떼떼떼!",
+        "네가 쌓아 온 노력이 좋은 결과로 이어질 거야.",
+        "오늘은 평소보다 좋은 아이디어가 잘 떠오르는 날이야.",
+        "잠깐의 휴식이 생각보다 큰 행운을 가져올 거야.",
+        "오늘 만나는 사람에게 따뜻한 말을 건네 보자. 좋은 기운이 돌아올 거야.",
+        "오늘의 너는 충분히 잘하고 있어. 자신감을 가져!",
+        "새로운 메뉴에 도전하듯 새로운 일에도 용기 내 봐.",
+        "작은 성취도 마음껏 칭찬해 주는 날로 만들자.",
+        "오늘은 네 취향을 믿어도 좋은 날이야.",
+        "기다리던 소식이 기분 좋은 방향으로 다가올 거야.",
+        "오늘은 웃음이 행운을 부르는 날이야.",
+        "네가 베푼 친절이 예상치 못한 기쁨으로 돌아올 거야.",
+        "바쁜 와중에도 맛있는 한 입을 챙기면 하루가 더 좋아질 거야.",
+        "오늘은 차근차근 해 나가는 것이 가장 빠른 길이야.",
+        "네 감각이 빛을 발하는 순간이 찾아올 거야.",
+        "오늘의 행운 메뉴는 네가 가장 좋아하는 사이드야.",
+        "양념감자처럼 하루에 즐거운 양념이 더해질 거야.",
+        "포테이토처럼 기본에 충실하면 좋은 결과가 따라와.",
+        "치즈스틱처럼 좋은 기회가 길게 이어질 거야.",
+        "너의 밝은 에너지가 주변까지 환하게 만들 거야.",
+        "오늘은 미뤄 둔 일을 하나만 끝내도 충분히 멋져.",
+        "좋은 일은 생각보다 가까운 곳에 있어.",
+        "너의 진심은 분명 누군가에게 전해지고 있어.",
+        "오늘은 마음이 가는 방향으로 한 걸음 나아가 봐.",
+        "작은 변화가 신선한 기쁨을 가져다줄 거야.",
+        "오늘은 평소보다 집중력이 좋은 날이야.",
+        "새로운 시도에서 뜻밖의 재미를 발견할 거야.",
+        "네가 고른 길에 좋은 가능성이 기다리고 있어.",
+        "오늘은 스스로에게 조금 더 다정해져도 좋아.",
+        "행운은 준비된 너를 반갑게 찾아올 거야.",
+        "오늘은 맛있는 간식처럼 달콤한 순간이 찾아올 거야.",
+        "네 아이디어가 주변 사람들에게 좋은 영감을 줄 거야.",
+        "작은 용기가 큰 뿌듯함으로 이어질 거야.",
+        "오늘은 마음속 걱정보다 기대를 조금 더 크게 가져 봐.",
+        "좋은 흐름이 시작되고 있어. 지금처럼만 해도 좋아.",
+        "오늘은 너의 장점이 자연스럽게 드러나는 날이야.",
+        "잠시 쉬어 가도 괜찮아. 너의 속도도 충분히 좋아.",
+        "오늘은 협력 속에서 좋은 답을 찾을 수 있을 거야.",
+        "너의 꼼꼼함이 빛을 발할 거야.",
+        "기분 좋은 우연이 하루를 장식할지도 몰라.",
+        "오늘은 좋아하는 것에 시간을 써도 좋은 날이야.",
+        "새로운 관점이 막혔던 일을 풀어 줄 거야.",
+        "너의 노력이 차곡차곡 실력으로 쌓이고 있어.",
+        "오늘은 작은 칭찬 한마디가 큰 힘이 될 거야.",
+        "따뜻한 마음을 나누면 기쁨이 두 배가 될 거야.",
+        "오늘은 한 번 더 시도해 볼 만한 날이야.",
+        "네 선택에는 네가 생각하는 것보다 더 많은 힘이 있어.",
+        "오늘은 좋은 소식과 웃음이 함께할 거야.",
+        "한 끼를 즐기는 여유가 하루의 활력을 채워 줄 거야.",
+        "오늘은 너에게 어울리는 기회가 찾아올 수 있어.",
+        "작은 성공을 놓치지 말고 기뻐하자.",
+        "네가 만든 결과물이 누군가에게 좋은 인상을 남길 거야.",
+        "오늘은 차분함이 최고의 무기가 될 거야.",
+        "뜻밖의 도움을 받으면 고맙게 받아들여도 좋아.",
+        "오늘은 네 취향대로 골라도 만족스러울 거야.",
+        "너의 꾸준함이 결국 가장 큰 행운이 될 거야.",
+        "잠깐의 산책이나 스트레칭이 기분을 환기해 줄 거야.",
+        "오늘은 중요한 일부터 하나씩 해결해 보자.",
+        "작은 친절이 예상보다 넓게 퍼져 나갈 거야.",
+        "너는 지금도 충분히 성장하고 있어.",
+        "오늘은 새로운 것을 배우기에 좋은 날이야.",
+        "좋아하는 사람과 나누는 대화가 기분을 밝혀 줄 거야.",
+        "너의 유연한 생각이 좋은 해결책을 찾아낼 거야.",
+        "오늘은 무리하지 않아도 좋은 흐름을 탈 수 있어.",
+        "작은 간식 타임이 다음 아이디어의 시작이 될 거야.",
+        "네가 가진 장점을 믿고 편안하게 움직여 봐.",
+        "오늘은 끝까지 해낸 자신을 자랑스러워할 날이야.",
+        "좋은 기회는 네가 준비한 만큼 더 크게 느껴질 거야.",
+        "오늘은 평범한 일상에서도 특별함을 발견할 거야.",
+        "네 밝은 표정이 주변의 분위기까지 좋게 만들 거야.",
+        "오늘은 결정한 일을 믿고 차분히 진행해 봐.",
+        "조금 느려도 괜찮아. 방향이 좋으면 충분해.",
+        "오늘은 네 수고를 알아주는 사람이 나타날 거야.",
+        "새로운 조합을 시도하면 의외의 취향을 발견할지도 몰라.",
+        "오늘은 작은 계획을 실천하기에 딱 좋은 날이야.",
+        "네가 나눈 웃음이 더 큰 웃음으로 돌아올 거야.",
+        "오늘은 실수보다 배움에 집중하면 더 멀리 갈 수 있어.",
+        "맛있는 사이드처럼 하루에 즐거운 포인트가 생길 거야.",
+        "오늘은 마음에 여유를 두면 좋은 답이 보일 거야.",
+        "네 진심과 성실함이 좋은 인연을 이어 줄 거야.",
+        "오늘은 자신 있게 의견을 말해도 좋아.",
+        "새로운 도전이 생각보다 즐거울 거야.",
+        "오늘은 소소한 보상이 기다리고 있는 날이야.",
+        "네가 시작한 일이 좋은 방향으로 자리를 잡아 갈 거야.",
+        "오늘은 감사한 일을 하나 떠올려 보자. 기분이 환해질 거야.",
+        "너의 창의력이 반짝이는 순간이 찾아올 거야.",
+        "오늘은 좋아하는 맛처럼 취향이 분명해지는 날이야.",
+        "작은 정리가 머릿속까지 산뜻하게 만들어 줄 거야.",
+        "네가 해 온 준비가 자연스럽게 실력으로 나타날 거야.",
+        "오늘은 도움을 주고받으며 함께 성장할 수 있어.",
+        "기분 좋은 변화가 천천히 다가오고 있어.",
+        "오늘은 나 자신을 믿는 마음이 행운을 불러올 거야.",
+        "너의 노력은 사라지지 않고 좋은 경험으로 남아.",
+        "오늘은 여유롭게 한 걸음씩 가도 충분히 멋져.",
+        "좋은 에너지를 가진 너에게 좋은 순간이 찾아올 거야.",
+        "롯데리아 사이드처럼 오늘의 하루에도 즐거운 곁들이가 생길 거야.",
+        "오늘은 네가 고른 작은 행복이 하루를 완성해 줄 거야.",
+        "오늘은 마음에 드는 사이드를 골라 작은 축하를 해 보자. 떼떼떼!",
+        "포근한 행운이 네 곁에 머무는 하루가 될 거야."
+      ];
+
+      const lucky = rnd([
+        '양념감자','포테이토','치즈스틱','치킨너겟','양념너겟',
+        '콘샐러드','소프트콘','통오징어링','팥빙수','토네이도'
+      ]);
+
+      this.sayFortune(
+        60 + Math.floor(Math.random()*41),
+        rnd(fortunes),
+        lucky
+      );
+
+      this.set('click', 520);
+
+    } else if (a === 'pat') {
+      this.heart();
+      this.set('click', 520);
+      this.say(pickLine(PAT_LINES));
+
+    } else if (a === 'sleep') {
+      this.set('sleep', 10000);
+      this.say(pickLine(SLEEP_LINES));
+
+    } else if (a === 'wakeup') {
+      this.requestWake(pickLine(WAKE_LINES));
+
+    } else if (a === 'hide') {
+      removePet(this.id);
+    }
+  }
+
+  remove() {
+    this.cv.remove();
+    this.bub.remove();
+  }
+}
+
+function chairShape(ctx) {
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#1f2a44';
+  ctx.lineJoin = ctx.lineCap = 'round';
+  ctx.fillStyle = '#d4a46a';
+
+  for (const r of [
+    [26,88,12,74],
+    [32,150,140,12],
+    [32,162,12,16],
+    [158,162,12,16]
+  ]) {
+    ctx.beginPath();
+    ctx.roundRect(...r, 4);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function syncActive() {
+  const list = pets.length ? [pets[pets.length - 1].id] : [];
+
+  localStorage.setItem('active', JSON.stringify(list));
+  ipcRenderer.send('active', list);
+}
+
+function removePet(id) {
+  const i = pets.findIndex(p => p.id === id);
+
+  if (i >= 0) {
+    pets[i].remove();
+    pets.splice(i, 1);
+  }
+
+  syncActive();
+}
+
+function togglePet(id) {
+  if (pets.length === 1 && pets[0].id === id) {
+    syncActive();
+    return;
+  }
+
+  const prev = pets[pets.length - 1];
+
+  for (const p of pets) p.remove();
+  pets = [];
+
+  const np = new Pet(id);
+
+  if (prev) {
+    np.x = prev.x;
+    np.y = prev.y;
+    np.dir = prev.dir;
+
+    if (prev.S !== np.S) setPetSize(np, prev.S);
+
+    petPositions._pos = { x:prev.x, y:prev.y };
+    savePetPositions();
+  }
+
+  pets.push(np);
+  syncActive();
+}
+
+ipcRenderer.on('toggle', (e, id) => togglePet(id));
+
+ipcRenderer.invoke('ids').then(ids => {
+  let a = [];
+
+  try {
+    a = JSON.parse(localStorage.getItem('active') || '[]');
+  } catch {}
+
+  const selected = a.find(id => ids.includes(id)) || ids[0];
+
+  if (selected) togglePet(selected);
+});
+
+const topHit = e => {
+  for (let i = pets.length-1; i >= 0; i--) {
+    if (pets[i].hit(e)) return pets[i];
+  }
+
+  return null;
+};
+
+ipcRenderer.on('typing-activity', () => {
+  const now = performance.now();
+
+  lastTypingActivity = now;
+  lastInputAt = now;
+
+  for (const p of pets) {
+    if (p.st === 'sleep' || p.st === 'wakeup') {
+      p.waking = false;
+      p.set('idle', 5000 + Math.random()*5000);
+    }
+
+    p.typing = true;
+    p.typingUntil = now + 260;
+    p.shakeX = Math.random() * 2 - 1;
+    p.shakeY = Math.random() * 2 - 1;
+
+    const frames = p.frames.typing || [];
+
+    if (frames.length) {
+      p.typingFrame = (p.typingFrame + 1) % Math.min(2, frames.length);
+    }
+  }
+});
+
+setInterval(() => {
+  const now = performance.now();
+
+  for (const p of pets) {
+    if (p.typing && now >= p.typingUntil) {
+      p.typing = false;
+    }
+  }
+}, 30);
+
+const front = p => {
+  pets.splice(pets.indexOf(p), 1);
+  pets.push(p);
+  document.body.append(p.cv, p.bub);
+};
+
+const setOver = v => {
+  if (v !== over) {
+    over = v;
+    ipcRenderer.send('ignore', !v);
+  }
+};
+
+document.addEventListener('pointerdown', e => {
+  // 메뉴 버튼을 클릭한 경우 캐릭터 클릭 처리를 하지 않음
+  if (menu.contains(e.target)) {
+    return;
+  }
+
+  // 메뉴 바깥을 클릭하면 메뉴 닫기
+  menu.style.display = 'none';
+
+  // 왼쪽 마우스 버튼만 캐릭터 조작에 사용
+  if (e.button !== 0) return;
+
+  const p = topHit(e);
+  if (!p) return;
+
+  dp = p;
+  front(p);
+  p.down(e);
+  setOver(true);
+});
+
+document.addEventListener('pointermove', e => {
+  mouseX = e.clientX;
+  mouseY = e.clientY;
+  lastInputAt = performance.now();
+
+  if (dp) {
+    dp.move(e);
+    setOver(true);
+    document.body.style.cursor = dp.drag?.moved ? 'grabbing' : 'pointer';
+    return;
+  }
+
+  const p = topHit(e);
+
+  setOver(!!p || menu.style.display === 'flex');
+  document.body.style.cursor = p ? 'grab' : 'default';
+});
+
+document.addEventListener('pointerup', () => {
+  if (dp) {
+    dp.up();
+    dp = null;
+  }
+});
+
+document.addEventListener('contextmenu', e => {
+  const p = topHit(e);
+
+  if (p) {
+    e.preventDefault();
+    dp = null;
+    p.drag = null;
+    openMenu(p, e.clientX, e.clientY);
+  }
+});
+
+function openMenu(p, cx, cy) {
+  const groups = [
+    [
+      ['recommend','🍟 사이드 추천'],
+      ['fortune','🔮 오늘의 간식 운세']
+    ],
+    [
+      ['pat','❤️ 쓰다듬기'],
+      [
+        p.st === 'sleep' ? 'wakeup' : 'sleep',
+        p.st === 'sleep' ? '☀️ 깨우기' : '💤 재우기'
+      ]
+    ],
+    [
+      ['switch','🔄 캐릭터 바꾸기'],
+      ['size','🔍 크기 조절'],
+      ['quit','🚪 종료하기']
+    ]
+  ];
+
+  menu.innerHTML = '';
+
+  groups.forEach((group, index) => {
+    if (index > 0) {
+      const divider = document.createElement('div');
+      divider.className = 'menu-divider';
+      menu.appendChild(divider);
+    }
+
+    for (const [k, label] of group) {
+      const b = document.createElement('button');
+      b.textContent = label;
+
+      b.onclick = () => {
+        if (k === 'switch') {
+          showCharacterMenu(p, cx, cy);
+          return;
+        }
+
+        if (k === 'size') {
+          showSizeMenu(p, cx, cy);
+          return;
+        }
+
+        menu.style.display = 'none';
+
+        if (k === 'quit') {
+          ipcRenderer.send('quit');
+          return;
+        }
+
+        p.act(k);
+      };
+
+      menu.appendChild(b);
+    }
+  });
+
+  menu.style.display = 'flex';
+  setOver(true);
+
+  menu.style.left = clamp(
+    cx, 4, innerWidth - menu.offsetWidth - 4
+  ) + 'px';
+
+  menu.style.top = clamp(
+    cy, 4, innerHeight - menu.offsetHeight - 4
+  ) + 'px';
+}
+
+function setPetSize(p, size) {
+  p.S = clamp(Math.round(size), 80, 420);
+  p.fy = (p.cfg.feetY || .89) * p.S;
+
+  p.cv.width = p.cv.height = p.S * dpr;
+  p.cv.style.width = p.cv.style.height = p.S + 'px';
+
+  p.x = clamp(
+    p.x,
+    p.S/2,
+    Math.max(p.S/2, innerWidth - p.S/2)
+  );
+
+  petPositions[p.id] = {
+    x:p.x,
+    y:p.y,
+    size:p.S
+  };
+
+  petPositions._pos = { x:p.x, y:p.y };
+  savePetPositions();
+}
+
+function showSizeMenu(p, cx, cy) {
+  menu.innerHTML = '';
+
+  for (const [label, fn] of [
+    ['➖ 작게', () => setPetSize(p, p.S * .88)],
+    ['➕ 크게', () => setPetSize(p, p.S * 1.14)],
+    ['↺ 기본 크기', () => setPetSize(p, p.cfg.size || 200)]
+  ]) {
+    const b = document.createElement('button');
+    b.textContent = label;
+
+    b.onclick = () => {
+      fn();
+
+      menu.style.display = 'flex';
+      setOver(true);
+
+      menu.style.left = clamp(
+        cx, 4, innerWidth - menu.offsetWidth - 4
+      ) + 'px';
+
+      menu.style.top = clamp(
+        cy, 4, innerHeight - menu.offsetHeight - 4
+      ) + 'px';
+    };
+
+    menu.appendChild(b);
+  }
+
+  menu.style.display = 'flex';
+  setOver(true);
+
+  menu.style.left = clamp(
+    cx, 4, innerWidth - menu.offsetWidth - 4
+  ) + 'px';
+
+  menu.style.top = clamp(
+    cy, 4, innerHeight - menu.offsetHeight - 4
+  ) + 'px';
+}
+
+document.addEventListener('wheel', e => {
+  if (!e.ctrlKey) return;
+
+  const p = topHit(e);
+  if (!p) return;
+
+  e.preventDefault();
+
+  setPetSize(
+    p,
+    p.S * (e.deltaY < 0 ? 1.08 : 1 / 1.08)
+  );
+}, { passive: false });
+
+function showCharacterMenu(current, cx, cy) {
+  ipcRenderer.invoke('ids').then(ids => {
+    menu.innerHTML = '';
+
+    const activeIds = new Set(pets.map(p => p.id));
+    const names = {
+      char_01:'포떼링',
+      char_02:'치떼링',
+      char_03:'솦떼링'
+    };
+
+    for (const id of ids) {
+      const b = document.createElement('button');
+
+      b.textContent =
+        (activeIds.has(id) ? '● ' : '○ ') + (names[id] || id);
+
+      b.onclick = () => {
+        menu.style.display = 'none';
+        togglePet(id);
+      };
+
+      menu.appendChild(b);
+    }
+
+    menu.style.display = 'flex';
+    setOver(true);
+
+    menu.style.left = clamp(
+      cx, 4, innerWidth - menu.offsetWidth - 4
+    ) + 'px';
+
+    menu.style.top = clamp(
+      cy, 4, innerHeight - menu.offsetHeight - 4
+    ) + 'px';
+  });
+}
+
+let last = performance.now();
+
+(function loop(now) {
+  const dt = Math.min(now - last, 50)/1000;
+  last = now;
+
+  for (const p of pets) {
+    p.update(dt, now);
+  }
+
+  requestAnimationFrame(loop);
+})(last);
+</script>
+</body>
+</html>

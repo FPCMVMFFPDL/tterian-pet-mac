@@ -1,0 +1,78 @@
+{
+  "name": "lotri-pet",
+  "version": "0.1.0",
+  "description": "TTERIAN_PET desktop pets for macOS",
+  "main": "main.js",
+  "dependencies": {
+    "uiohook-napi": "^1.5.3"
+  },
+  "productName": "TTERIAN_PET",
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac dmg zip",
+    "pack:mac": "electron-builder --mac dir"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "com.tterian.pet",
+    "productName": "TTERIAN_PET",
+    "files": [
+      "main.js",
+      "index.html",
+      "characters/**/*",
+      "shared/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/**/*.node"
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": null,
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "데스크톱 펫 동작에 필요한 입력 이벤트를 감지합니다."
+      },
+      "icon": "build/icon.png"
+    },
+    "dmg": {
+      "background": "build/dmg-background.png",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 155,
+          "y": 235,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 235,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}
