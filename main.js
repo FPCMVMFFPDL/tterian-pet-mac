@@ -1,5 +1,5 @@
 // 바탕화면 전체를 덮는 투명 창 + 트레이 메뉴
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, systemPreferences } = require('electron');
 const fs = require('fs'), path = require('path');
 
 let uiohook = null;
@@ -84,6 +84,12 @@ app.whenReady().then(() => {
   // macOS supports the floating window level more reliably than screen-saver.
   win.setAlwaysOnTop(true, process.platform === 'darwin' ? 'floating' : 'screen-saver');
   win.setIgnoreMouseEvents(true, { forward: true });
+  // 맥 전용: 독 아이콘 숨기고(메뉴바 아이콘만 사용), 전체화면 앱 위에서도 보이게
+  if (process.platform === 'darwin') {
+    app.dock?.hide();
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+
   win.loadFile('index.html');
 
   if (uiohook) {
@@ -93,10 +99,24 @@ app.whenReady().then(() => {
       }
     });
 
-    try {
-      uiohook.start();
-    } catch (e) {
-      console.warn('키보드 감지 시작 실패:', e.message);
+    const startHook = () => {
+      try {
+        uiohook.start();
+      } catch (e) {
+        console.warn('키보드 감지 시작 실패:', e.message);
+      }
+    };
+
+    if (process.platform === 'darwin' && !systemPreferences.isTrustedAccessibilityClient(true)) {
+      // 맥은 '손쉬운 사용' 권한을 허용해야 키 입력을 읽을 수 있어요. 허용될 때까지 3초마다 확인합니다.
+      const timer = setInterval(() => {
+        if (systemPreferences.isTrustedAccessibilityClient(false)) {
+          clearInterval(timer);
+          startHook();
+        }
+      }, 3000);
+    } else {
+      startHook();
     }
   }
 
@@ -122,8 +142,11 @@ app.whenReady().then(() => {
   });
 
   // 시스템 트레이 아이콘
+  const trayIconPath = path.join(__dirname, 'shared', 'tray_icon.png');
   tray = new Tray(
-    path.join(__dirname, 'shared', 'tray_icon.png')
+    process.platform === 'darwin'
+      ? nativeImage.createFromPath(trayIconPath).resize({ width: 18, height: 18 }) // 맥 메뉴바용 작은 크기
+      : trayIconPath
   );
 
   tray.setToolTip('TTERIAN_PET');
